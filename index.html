@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Check TOCFL certificate PDF metadata against the supplied reference format."
+    />
+    <title>Certificate Metadata Checker</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script defer src="vendor/exceljs/exceljs.min.js"></script>
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="site-header">
+        <a class="brand" href="#" aria-label="Certificate checker home">
+          <span class="brand-mark" aria-hidden="true">M</span>
+          <span>Metadata checker</span>
+        </a>
+        <span class="privacy-pill">
+          <span class="privacy-dot" aria-hidden="true"></span>
+          Files stay in your browser
+        </span>
+      </header>
+
+      <main>
+        <section class="hero" aria-labelledby="page-title">
+          <p class="eyebrow">TOCFL CERTIFICATE FORMAT</p>
+          <h1 id="page-title">Check certificate metadata in seconds.</h1>
+          <p class="hero-copy">
+            Upload one or many PDF certificates. Each file is compared with the
+            metadata pattern shared by the 41 reference certificates.
+          </p>
+          <div class="scope-note">
+            <span aria-hidden="true">i</span>
+            This checks metadata format only. It does not prove that a
+            certificate is authentic or valid with the issuing authority.
+          </div>
+        </section>
+
+        <section class="upload-card" aria-labelledby="upload-title">
+          <div class="section-heading">
+            <div>
+              <p class="step-label">STEP 1</p>
+              <h2 id="upload-title">Add PDF certificates</h2>
+            </div>
+            <button class="text-button" id="clearButton" type="button" hidden>
+              Clear files
+            </button>
+          </div>
+
+          <label class="drop-zone" id="dropZone" for="fileInput">
+            <input
+              id="fileInput"
+              type="file"
+              accept=".pdf,application/pdf"
+              multiple
+            />
+            <span class="upload-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" role="img">
+                <path
+                  d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14.5v3A2.5 2.5 0 0 0 7.5 20h9a2.5 2.5 0 0 0 2.5-2.5v-3"
+                />
+              </svg>
+            </span>
+            <span class="drop-title">Drop PDF files here</span>
+            <span class="drop-subtitle">or click to browse · multiple files supported</span>
+          </label>
+
+          <div class="file-queue" id="fileQueue" hidden>
+            <div class="queue-summary">
+              <span id="queueCount">0 files selected</span>
+              <span id="queueSize">0 MB</span>
+            </div>
+            <ul id="queueList"></ul>
+          </div>
+
+          <button class="primary-button" id="checkButton" type="button" disabled>
+            <span id="checkButtonLabel">Check metadata</span>
+            <span class="button-arrow" aria-hidden="true">→</span>
+          </button>
+          <div
+            class="progress"
+            id="progress"
+            role="status"
+            aria-live="polite"
+            hidden
+          >
+            <div class="progress-track">
+              <div class="progress-bar" id="progressBar"></div>
+            </div>
+            <span id="progressText">Preparing files…</span>
+          </div>
+        </section>
+
+        <section class="results-section" id="resultsSection" aria-labelledby="results-title" hidden>
+          <div class="results-heading">
+            <div>
+              <p class="step-label">STEP 2</p>
+              <h2 id="results-title">Results</h2>
+              <p id="resultsSummary">No files checked yet.</p>
+            </div>
+            <button class="secondary-button" id="downloadButton" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 4v11m0 0 4-4m-4 4-4-4M5 19h14" />
+              </svg>
+              Download XLSX
+            </button>
+          </div>
+
+          <div class="legend" aria-label="Result marker legend">
+            <span><i class="legend-swatch pass"></i> Metadata matches</span>
+            <span><i class="legend-swatch fail"></i> Does not match</span>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">File</th>
+                  <th scope="col">Overall</th>
+                  <th scope="col">Creator</th>
+                  <th scope="col">Producer</th>
+                  <th scope="col">Category</th>
+                  <th scope="col">Issue</th>
+                  <th scope="col">Verify</th>
+                  <th scope="col">Version</th>
+                  <th scope="col">Cert ID</th>
+                  <th scope="col">Other data</th>
+                </tr>
+              </thead>
+              <tbody id="resultsBody"></tbody>
+            </table>
+          </div>
+          <p class="table-help">
+            Creation and modification dates are reported in the spreadsheet but
+            are not used as match markers.
+          </p>
+        </section>
+
+        <section class="pattern-section" aria-labelledby="pattern-title">
+          <div>
+            <p class="step-label">REFERENCE PATTERN</p>
+            <h2 id="pattern-title">What is compared?</h2>
+          </div>
+          <div class="pattern-grid">
+            <div class="pattern-item">
+              <span>01</span>
+              <div><strong>PDF creator</strong><p>pdf-lib project signature</p></div>
+            </div>
+            <div class="pattern-item">
+              <span>02</span>
+              <div><strong>PDF producer</strong><p>pdf-lib project signature</p></div>
+            </div>
+            <div class="pattern-item">
+              <span>03</span>
+              <div><strong>Certificate codes</strong><p>Category, issue, verify, version</p></div>
+            </div>
+            <div class="pattern-item">
+              <span>04</span>
+              <div><strong>Unique metadata</strong><p>Cert ID and embedded hash format</p></div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer>
+        <p>Client-side metadata comparison · No files are uploaded to a server</p>
+      </footer>
+    </div>
+
+    <template id="queueItemTemplate">
+      <li>
+        <span class="pdf-badge">PDF</span>
+        <span class="queue-file-name"></span>
+        <span class="queue-file-size"></span>
+      </li>
+    </template>
+  </body>
+</html>
