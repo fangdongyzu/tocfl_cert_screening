@@ -46,3 +46,20 @@ Pages, or another static host. Upload these files:
 
 No server, database, or runtime CDN connection is required. PDF.js 5.4.624 and
 ExcelJS 4.4.0 are pinned under `vendor/`; their license files are included.
+
+## Certificate details in XLSX
+
+The export also reads the PDF's printed text and includes `REG.NO.:`,
+`English name`, `Birthday (YYYYMMDD)`, and `Level`. Birthdays are Excel dates
+displayed as `yyyymmdd` (for example, February 1, 1997 displays as `19970201`).
+These fields are reported separately and do not change metadata match results.
+Missing fields or text extraction errors are reported in `Certificate text notes`;
+image-only scans require OCR and are not inferred from filenames or metadata.
+
+Include `certificate-details.mjs` when deploying the static site.
+
+Run regression tests with Node.js 22 or later:
+
+```sh
+node --test tests/*.test.mjs
+```
