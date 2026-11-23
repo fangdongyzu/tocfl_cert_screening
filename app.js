@@ -30,6 +30,18 @@ const state = {
   checking: false,
 };
 
+// A Windows short name cannot be converted back to its original long name.
+// Users can supply the original name when the browser supplies a short name.
+const fileNameOverrides = new WeakMap();
+
+function getFileName(file) {
+  return fileNameOverrides.get(file) ?? file.name;
+}
+
+function looksLikeShortName(name) {
+  return /^[^\\/]{1,6}~[0-9]+(?:\.[^.]*)?$/i.test(name);
+}
+
 const elements = {
   fileInput: document.querySelector("#fileInput"),
   dropZone: document.querySelector("#dropZone"),
@@ -49,6 +61,73 @@ const elements = {
   resultsBody: document.querySelector("#resultsBody"),
   downloadButton: document.querySelector("#downloadButton"),
 };
+
+// Read actual directory entries instead of relying only on file-input names.
+// This is optional: the original file input and drag-and-drop still work.
+const folderControls = document.createElement("div");
+folderControls.style.margin = "12px 0";
+const folderButton = document.createElement("button");
+folderButton.type = "button";
+folderButton.textContent = "Select PDF folder";
+folderButton.style.padding = "10px 16px";
+const folderStatus = document.createElement("p");
+folderStatus.setAttribute("role", "status");
+folderStatus.style.margin = "8px 0";
+folderControls.append(folderButton, folderStatus);
+elements.dropZone.insertAdjacentElement("afterend", folderControls);
+folderButton.addEventListener("click", selectPdfFolder);
+
+const supportsFolderPicker = window.isSecureContext &&
+  typeof window.showDirectoryPicker === "function";
+if (!supportsFolderPicker) {
+  folderButton.disabled = true;
+  folderStatus.textContent = "Folder selection needs a supported browser such as Chrome on HTTPS or localhost.";
+}
+
+async function fileFromDirectoryEntry(entry, entryName = entry.name) {
+  const file = await entry.getFile();
+  // Prefer the directory entry's name, even if file.name is an 8.3 alias.
+  fileNameOverrides.set(file, entryName);
+  return file;
+}
+
+async function selectPdfFolder() {
+  if (state.checking || folderButton.disabled) return;
+  folderButton.disabled = true;
+  try {
+    const directory = await window.showDirectoryPicker({ mode: "read" });
+    folderStatus.textContent = "Reading PDF filenames...";
+    const incoming = [];
+    let failed = 0;
+    // Only read PDFs directly inside the selected folder.
+    for await (const [entryName, entry] of directory.entries()) {
+      if (entry.kind !== "file" || !/\.pdf$/i.test(entryName)) continue;
+      try {
+        incoming.push(await fileFromDirectoryEntry(entry, entryName));
+      } catch {
+        failed += 1;
+      }
+    }
+    incoming.sort((a, b) => getFileName(a).localeCompare(getFileName(b)));
+    if (state.checking) {
+      folderStatus.textContent = "Checking is in progress. Select the folder again when it finishes.";
+      return;
+    }
+    if (incoming.length) addFiles(incoming);
+    folderStatus.textContent = incoming.length
+      ? incoming.length + " PDFs read from folder entries. Check the filenames below before exporting."
+      : "No readable PDFs found directly inside this folder.";
+    if (failed) folderStatus.textContent += " Could not read " + failed + " PDF(s).";
+    if (incoming.some(file => looksLikeShortName(getFileName(file)))) {
+      folderStatus.textContent += " Some folder entries still have possible short names; their full names have not been recovered.";
+    }
+  } catch (error) {
+    if (error?.name === "AbortError") return;
+    folderStatus.textContent = "Could not open this folder: " + readableError(error);
+  } finally {
+    folderButton.disabled = !supportsFolderPicker;
+  }
+}
 
 elements.fileInput.addEventListener("change", (event) => {
   addFiles(event.target.files);
@@ -82,11 +161,11 @@ function addFiles(fileList) {
 
   const incoming = Array.from(fileList);
   const known = new Set(
-    state.files.map((file) => `${file.name}:${file.size}:${file.lastModified}`),
+    state.files.map((file) => `${getFileName(file)}:${file.size}:${file.lastModified}`),
   );
 
   incoming.forEach((file) => {
-    const key = `${file.name}:${file.size}:${file.lastModified}`;
+    const key = `${getFileName(file)}:${file.size}:${file.lastModified}`;
     if (!known.has(key)) {
       state.files.push(file);
       known.add(key);
@@ -112,7 +191,46 @@ function renderQueue() {
 
   state.files.forEach((file) => {
     const row = elements.queueTemplate.content.cloneNode(true);
-    row.querySelector(".queue-file-name").textContent = file.name;
+    const nameElement = row.querySelector(".queue-file-name");
+    const fullName = getFileName(file);
+    nameElement.textContent = fullName;
+    nameElement.title = fullName;
+    Object.assign(nameElement.style, {
+      whiteSpace: "normal",
+      overflow: "visible",
+      textOverflow: "clip",
+      overflowWrap: "anywhere",
+      minWidth: "0",
+    });
+
+    if (looksLikeShortName(fullName)) {
+      const warning = document.createElement("small");
+      warning.textContent = "Possible Windows short name. Try Select PDF folder above, or enter the full filename below.";
+      warning.style.display = "block";
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = fullName;
+      input.setAttribute("aria-label", "Full filename including extension");
+      input.style.width = "100%";
+      input.style.boxSizing = "border-box";
+      input.disabled = state.checking;
+      input.addEventListener("change", () => {
+        if (state.checking) {
+          input.value = getFileName(file);
+          return;
+        }
+        const enteredName = input.value.trim();
+        if (!enteredName || /[\\/]/.test(enteredName)) {
+          input.value = getFileName(file);
+          return;
+        }
+        fileNameOverrides.set(file, enteredName);
+        state.results = [];
+        elements.resultsSection.hidden = true;
+        renderQueue();
+      });
+      nameElement.append(warning, input);
+    }
     row.querySelector(".queue-file-size").textContent = formatBytes(file.size);
     elements.queueList.append(row);
   });
@@ -139,7 +257,7 @@ async function checkAllFiles() {
 
   for (let index = 0; index < state.files.length; index += 1) {
     const file = state.files[index];
-    elements.progressText.textContent = `Checking ${index + 1} of ${state.files.length}: ${file.name}`;
+    elements.progressText.textContent = `Checking ${index + 1} of ${state.files.length}: ${getFileName(file)}`;
 
     try {
       state.results.push(await inspectPdfMetadata(file));
@@ -200,7 +318,7 @@ async function inspectPdfMetadata(file) {
     };
 
     return {
-      fileName: file.name,
+      fileName: getFileName(file),
       fileSize: file.size,
       overall: Object.values(markers).every(Boolean),
       markers,
@@ -259,7 +377,7 @@ function validateBase64(value, byteLength) {
 
 function failedResult(file, error) {
   return {
-    fileName: file.name,
+    fileName: getFileName(file),
     fileSize: file.size,
     overall: false,
     markers: Object.fromEntries(MARKERS.map(([key]) => [key, false])),
@@ -290,7 +408,15 @@ function renderResults() {
     const row = document.createElement("tr");
     const fileCell = document.createElement("td");
     fileCell.textContent = result.fileName;
-    fileCell.title = result.error || result.fileName;
+    fileCell.title = result.error
+      ? result.fileName + "\n" + result.error
+      : result.fileName;
+    Object.assign(fileCell.style, {
+      whiteSpace: "normal",
+      overflow: "visible",
+      textOverflow: "clip",
+      overflowWrap: "anywhere",
+    });
     row.append(fileCell);
     row.append(markerCell(result.overall, true));
 
@@ -337,7 +463,7 @@ async function downloadWorkbook() {
     });
 
     sheet.columns = [
-      { header: "File", key: "fileName", width: 42 },
+      { header: "File", key: "fileName", width: 70 },
       { header: "Overall", key: "overall", width: 14 },
       ...MARKERS.map(([key, label]) => ({ header: label, key, width: 14 })),
       { header: "PDF version", key: "pdfFormatVersion", width: 14 },
@@ -421,7 +547,13 @@ function styleWorkbook(sheet) {
 
   for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber += 1) {
     const row = sheet.getRow(rowNumber);
-    row.height = 25;
+    // Allow extra height for long filenames, including CJK characters.
+    const name = String(row.getCell(1).value ?? "");
+    const nameWidth = Array.from(name).reduce(
+      (sum, character) => sum + (character.codePointAt(0) > 255 ? 2 : 1),
+      0,
+    );
+    row.height = Math.min(409, Math.max(25, Math.ceil(nameWidth / 60) * 16 + 10));
     row.eachCell({ includeEmpty: true }, (cell, columnNumber) => {
       cell.border = {
         bottom: { style: "thin", color: { argb: borderColor } },
@@ -430,6 +562,7 @@ function styleWorkbook(sheet) {
       cell.alignment = {
         vertical: "middle",
         horizontal: columnNumber === 1 ? "left" : "center",
+        wrapText: columnNumber === 1,
       };
 
       if (columnNumber >= 2 && columnNumber <= markerEndColumn) {
