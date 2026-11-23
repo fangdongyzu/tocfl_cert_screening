@@ -1,4 +1,5 @@
 import * as pdfjsLib from "./vendor/pdfjs/pdf.mjs";
+import { extractCertificateDetails, parseCertificateDetails } from "./certificate-details.mjs";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "./vendor/pdfjs/pdf.worker.mjs";
 
@@ -302,6 +303,16 @@ async function inspectPdfMetadata(file) {
     const otherRaw = value("Other");
     const other = parseOther(otherRaw);
 
+    let certificate = parseCertificateDetails("");
+    let extractionError = "";
+    try {
+      certificate = await extractCertificateDetails(pdf);
+      const missing = Object.entries(certificate).filter(([, value]) => !value).map(([key]) => key);
+      if (missing.length) extractionError = `Certificate text fields not found: ${missing.join(", ")}`;
+    } catch (error) {
+      extractionError = `Unable to read certificate text: ${readableError(error)}`;
+    }
+
     const markers = {
       creator: creator === EXPECTED.creator,
       producer: producer === EXPECTED.producer,
@@ -322,6 +333,8 @@ async function inspectPdfMetadata(file) {
       fileSize: file.size,
       overall: Object.values(markers).every(Boolean),
       markers,
+      certificate,
+      extractionError,
       metadata: {
         pdfFormatVersion: value("PDFFormatVersion"),
         creator,
@@ -381,6 +394,8 @@ function failedResult(file, error) {
     fileSize: file.size,
     overall: false,
     markers: Object.fromEntries(MARKERS.map(([key]) => [key, false])),
+    certificate: parseCertificateDetails(""),
+    extractionError: "Certificate text could not be read",
     metadata: {
       pdfFormatVersion: "",
       creator: "",
@@ -466,6 +481,10 @@ async function downloadWorkbook() {
       { header: "File", key: "fileName", width: 70 },
       { header: "Overall", key: "overall", width: 14 },
       ...MARKERS.map(([key, label]) => ({ header: label, key, width: 14 })),
+      { header: "REG.NO.:", key: "registrationNumber", width: 20 },
+      { header: "English name", key: "englishName", width: 32 },
+      { header: "Birthday (YYYYMMDD)", key: "birthday", width: 24, style: { numFmt: "yyyymmdd" } },
+      { header: "Level", key: "level", width: 16 },
       { header: "PDF version", key: "pdfFormatVersion", width: 14 },
       { header: "Creator value", key: "creatorValue", width: 48 },
       { header: "Producer value", key: "producerValue", width: 48 },
@@ -481,12 +500,21 @@ async function downloadWorkbook() {
       { header: "ModDate (ignored)", key: "modificationDate", width: 24 },
       { header: "Pages (reported only)", key: "pageCount", width: 20 },
       { header: "Error", key: "error", width: 42 },
+      { header: "Certificate text notes", key: "extractionError", width: 60 },
     ];
 
     state.results.forEach((result) => {
       sheet.addRow({
         fileName: result.fileName,
         overall: result.overall ? "MATCH" : "DIFFERENT",
+        ...result.certificate,
+        birthday: result.certificate.birthday
+          ? new Date(Date.UTC(
+            Number(result.certificate.birthday.slice(0, 4)),
+            Number(result.certificate.birthday.slice(4, 6)) - 1,
+            Number(result.certificate.birthday.slice(6, 8)),
+          )) : "",
+        extractionError: result.extractionError,
         ...Object.fromEntries(
           MARKERS.map(([key]) => [key, result.markers[key] ? "MATCH" : "DIFFERENT"]),
         ),
